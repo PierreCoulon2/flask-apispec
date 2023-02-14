@@ -67,7 +67,7 @@ def marshal_with(schema, code='default', description=''):
         options = {
             code: {
                 'content': {
-                    "schema": {
+                    schema_name: {
                         "schema": {
                             "items": {"$ref": '#/components/schemas/' + schema_name},
                             "type": "array"
