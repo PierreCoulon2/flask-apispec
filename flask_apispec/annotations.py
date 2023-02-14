@@ -2,6 +2,9 @@ import functools
 
 from flask_apispec import utils
 from flask_apispec.wrapper import Wrapper
+from apispec.ext.marshmallow import MarshmallowPlugin, OpenAPIConverter, SchemaResolver
+from apispec.ext.marshmallow.field_converter import FieldConverterMixin
+from marshmallow import Schema
 
 
 def use_kwargs(args, location=None, inherit=None, apply=None, **kwargs):
@@ -38,7 +41,7 @@ def use_kwargs(args, location=None, inherit=None, apply=None, **kwargs):
     return wrapper
 
 
-def marshal_with(schema, code='default', description='', inherit=None, apply=None):
+def marshal_with(schema, code='default', description=''):
     """Marshal the return value of the decorated view function using the
     specified schema.
 
@@ -57,18 +60,29 @@ def marshal_with(schema, code='default', description='', inherit=None, apply=Non
     :param schema: :class:`Schema <marshmallow.Schema>` class or instance, or `None`
     :param code: Optional HTTP response code
     :param description: Optional response description
-    :param inherit: Inherit schemas from parent classes
-    :param apply: Marshal response with specified schema
     """
+
     def wrapper(func):
+        schema_name = schema.__str__().split('<')[1].split('Schema')[0]
         options = {
             code: {
-                'schema': schema or {},
+                'content': {
+                    "schema": {
+                        "schema": {
+                            "items": {"$ref": '#/components/schemas/' + schema_name},
+                            "type": "array"
+                        } if schema.many else {
+                            "$ref": '#/components/schemas/' + schema_name
+                        }
+                    }
+                },
                 'description': description,
             },
         }
-        annotate(func, 'schemas', [options], inherit=inherit, apply=apply)
+        annotate(func, 'schemas', [{code: {'schema': schema}}], inherit=True, apply=False)
+        annotate(func, 'schemas', [options], inherit=True, apply=False)
         return activate(func)
+
     return wrapper
 
 
@@ -123,3 +137,33 @@ def activate(func):
 
     wrapped.__apispec__['wrapped'] = True
     return wrapped
+
+def input_body(schema: Schema):
+    def wrapper(func):
+        fc = FieldConverterMixin()
+        fc.init_attribute_functions()
+        content = {}
+
+        for field in schema.fields.values():
+            content[field.name] = fc.field2property(field)
+        annotate(func, 'docs', [{
+            "requestBody": {
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "type": "object",
+                            "properties": content
+                        }
+                    }
+                }
+            }
+        }])
+        return activate(func)
+
+    return wrapper
+
+def register_schema(schema):
+    def wrapper(func):
+        annotate(func, 'schemas', [{"code": {'schema': schema}}])
+
+    return wrapper
